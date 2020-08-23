@@ -102,7 +102,7 @@ index 56b955227f11613f112c77c445a9de5bfa3a60f7..1b38462e9c787ad7a80ebc5358dd2c40
      public boolean intersects(AxisAlignedBB axisalingedbb) {
          return this.aabb.intersects(axisalingedbb);
 diff --git a/src/main/java/net/minecraft/server/AxisAlignedBB.java b/src/main/java/net/minecraft/server/AxisAlignedBB.java
-index d54bf71409fe299671aa3f72315f18a188b0db9d..8cb700e6c2a33cf7b70add02bf1325a0eabf9a86 100644
+index d54bf71409fe299671aa3f72315f18a188b0db9d..bfe5863a4065bc528fe1d90590d7b00ab5ab3fbd 100644
 --- a/src/main/java/net/minecraft/server/AxisAlignedBB.java
 +++ b/src/main/java/net/minecraft/server/AxisAlignedBB.java
 @@ -15,85 +15,107 @@ public class AxisAlignedBB {
@@ -146,7 +146,7 @@ index d54bf71409fe299671aa3f72315f18a188b0db9d..8cb700e6c2a33cf7b70add02bf1325a0
 +    public static strictfp double careful_min(double bigger, double add, double min) {
 +        if (bigger + add < min) { // This is why we need strictfp: This is the EXACT calculation that will occur when offsetting the source AABB after the minimum move value is calculated
 +            // fail: adjust for error
-+            return Math.max(0, add + Math.ulp(add));
++            return Math.min(0, add + Math.ulp(add));
 +        }
 +        return add;
 +    }

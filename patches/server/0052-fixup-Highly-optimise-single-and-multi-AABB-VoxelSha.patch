@@ -6,11 +6,16 @@ Subject: [PATCH] fixup! Highly optimise single and multi-AABB VoxelShapes and
 
 
 diff --git a/src/main/java/com/tuinity/tuinity/voxel/AABBVoxelShape.java b/src/main/java/com/tuinity/tuinity/voxel/AABBVoxelShape.java
-index 56b955227f11613f112c77c445a9de5bfa3a60f7..1b38462e9c787ad7a80ebc5358dd2c40196445f1 100644
+index 56b955227f11613f112c77c445a9de5bfa3a60f7..b321ad51635949d07b9b818f2940a31bca1a74e3 100644
 --- a/src/main/java/com/tuinity/tuinity/voxel/AABBVoxelShape.java
 +++ b/src/main/java/com/tuinity/tuinity/voxel/AABBVoxelShape.java
-@@ -148,88 +148,16 @@ public final class AABBVoxelShape extends VoxelShape {
-         }
+@@ -143,95 +143,20 @@ public final class AABBVoxelShape extends VoxelShape {
+ 
+     @Override
+     public double a(EnumDirection.EnumAxis enumdirection_enumaxis, AxisAlignedBB axisalignedbb, double d0) { // collide
+-        if (Math.abs(d0) < 1.0e-7) {
+-            return 0.0;
+-        }
          switch (enumdirection_enumaxis.ordinal()) {
              case 0:
 -                return this.collideX(axisalignedbb, d0);
@@ -100,16 +105,24 @@ index 56b955227f11613f112c77c445a9de5bfa3a60f7..1b38462e9c787ad7a80ebc5358dd2c40
 -
      @Override
      public boolean intersects(AxisAlignedBB axisalingedbb) {
-         return this.aabb.intersects(axisalingedbb);
+-        return this.aabb.intersects(axisalingedbb);
++        return this.aabb.voxelShapeIntersect(axisalingedbb);
+     }
+ }
 diff --git a/src/main/java/net/minecraft/server/AxisAlignedBB.java b/src/main/java/net/minecraft/server/AxisAlignedBB.java
-index d54bf71409fe299671aa3f72315f18a188b0db9d..bfe5863a4065bc528fe1d90590d7b00ab5ab3fbd 100644
+index d54bf71409fe299671aa3f72315f18a188b0db9d..8ef1bbefc8310d0eeea91540c808fecfc7788def 100644
 --- a/src/main/java/net/minecraft/server/AxisAlignedBB.java
 +++ b/src/main/java/net/minecraft/server/AxisAlignedBB.java
-@@ -15,85 +15,107 @@ public class AxisAlignedBB {
+@@ -14,86 +14,122 @@ public class AxisAlignedBB {
+     public final double maxZ;
  
      // Tuinity start
++    private final boolean isEmpty;
      public final boolean isEmpty() {
 -        return (this.maxX - this.minX) < 1.0E-7 && (this.maxY - this.minY) < 1.0E-7 && (this.maxZ - this.minZ) < 1.0E-7;
++        return this.isEmpty;
++    }
++    private final boolean isEmpty0() {
 +        return (this.maxX - this.minX) < EPSILON && (this.maxY - this.minY) < EPSILON && (this.maxZ - this.minZ) < EPSILON;
      }
  
@@ -119,6 +132,25 @@ index d54bf71409fe299671aa3f72315f18a188b0db9d..bfe5863a4065bc528fe1d90590d7b00a
          // use a bounding box bigger than the chunk to prevent entities from entering it on move
 -        return new AxisAlignedBB(x - 1.0E-7, 0.0, z - 1.0E-7, x + (16.0 + 1.0E-7), 255.0, z + (16.0 + 1.0E-7), false);
 +        return new AxisAlignedBB(x - EPSILON, 0.0, z - EPSILON, x + (16.0 + EPSILON), 255.0, z + (16.0 + EPSILON), false);
++    }
++
++    /*
++      A couple of rules for VoxelShape collisions:
++      Two shapes only intersect if they are actually more than EPSILON units into each other. This also applies to movement
++      checks.
++      If the two shapes strictly collide, then the return value of a collide call will return a value in the opposite
++      direction of the source move. However, this value will not be greater in magnitude than EPSILON. Collision code
++      will automatically round it to 0.
++     */
++
++    public final boolean voxelShapeIntersect(AxisAlignedBB other) {
++        return this.voxelShapeIntersect(other.minX, other.minY, other.minZ, other.maxX, other.maxY, other.maxZ);
++    }
++
++    public final boolean voxelShapeIntersect(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
++        return (this.minX - maxX) < -EPSILON && (this.maxX - minX) > EPSILON &&
++               (this.minY - maxY) < -EPSILON && (this.maxY - minY) > EPSILON &&
++               (this.minZ - maxZ) < -EPSILON && (this.maxZ - minZ) > EPSILON;
      }
  
 -    // collideX, collideY, collideZ are copied from 1.12 src
@@ -128,139 +160,124 @@ index d54bf71409fe299671aa3f72315f18a188b0db9d..bfe5863a4065bc528fe1d90590d7b00a
 -                && axisalignedbb.maxZ > this.minZ && axisalignedbb.minZ < this.maxZ) {
 -            double d1;
 +    public static final double EPSILON = 1.0E-7;
++
++    public static double collideX(AxisAlignedBB target, AxisAlignedBB source, double source_move) {
++        if (target.isEmpty() | source.isEmpty()) {
++            return source_move;
++        }
++        if (Math.abs(source_move) < EPSILON) {
++            return 0.0;
++        }
++
++        if ((source.minY - target.maxY) < -EPSILON && (source.maxY - target.minY) > EPSILON &&
++                (source.minZ - target.maxZ) < -EPSILON && (source.maxZ - target.minZ) > EPSILON) {
  
 -            if (d0 > 0.0D && axisalignedbb.maxX <= this.minX) {
 -                d1 = this.minX - axisalignedbb.maxX;
 -                if (d1 < d0) {
 -                    d0 = d1;
-+    // this function ASSUMES smaller <= max and add >= 0.0
-+    public static strictfp double careful_max(double smaller, double add, double max) {
-+        if (smaller + add > max) { // This is why we need strictfp: This is the EXACT calculation that will occur when offsetting the source AABB after the minimum move value is calculated
-+            // fail: adjust for error
-+            return Math.max(0, add - Math.ulp(add));
-+        }
-+        return add;
-+    }
-+
-+    // this function ASSUMES bigger >= min and add <= 0.0
-+    public static strictfp double careful_min(double bigger, double add, double min) {
-+        if (bigger + add < min) { // This is why we need strictfp: This is the EXACT calculation that will occur when offsetting the source AABB after the minimum move value is calculated
-+            // fail: adjust for error
-+            return Math.min(0, add + Math.ulp(add));
-+        }
-+        return add;
-+    }
-+
-+    // these methods are defined strictfp because they ensure that rounding errors does not make
-+    // the resulting move value collide with the target AABB
-+    // The expected error is rounding error in 1ULP, which is small enough that guard bits (i.e 80bit precision)
-+    // could hide in checking but then would expose by rounding for returning
-+    // an alternative to this catastrophe of a solution is for us to ensure that the maximum distance between a source
-+    // and target AABB is greater-than EPSILON, but this would mean slightly changing all collision results (Y axis
-+    // is the most obvious break) which will break some expected behaviours.
-+    public static strictfp double collideX(AxisAlignedBB target, AxisAlignedBB source, double source_move) {
-+        if (source.maxY > target.minY && source.minY < target.maxY
-+                && source.maxZ > target.minZ && source.minZ < target.maxZ) {
-+            // we really want to be careful to ensure that this condition is never true for the adjusted move value:
-+            // (source.max + ret) > this.min && (source.min + ret) < this.max (this is an intersect check)
 +            if (source_move >= 0.0) {
-+                double max_move = target.minX - source.maxX; // < 0.0 if no collision
-+                if (max_move < 0.0) {
++                double max_move = target.minX - source.maxX; // < 0.0 if no strict collision
++                if (max_move < -EPSILON) {
 +                    return source_move;
                  }
 -            } else if (d0 < 0.0D && axisalignedbb.minX >= this.maxX) {
 -                d1 = this.maxX - axisalignedbb.minX;
 -                if (d1 > d0) {
 -                    d0 = d1;
-+                return careful_max(source.maxX, Math.min(max_move, source_move), target.minX);
++                return Math.min(max_move, source_move);
 +            } else {
-+                double max_move = target.maxX - source.minX; // > 0.0 if no collision
-+                if (max_move > 0.0) {
++                double max_move = target.maxX - source.minX; // > 0.0 if no strict collision
++                if (max_move > EPSILON) {
 +                    return source_move;
                  }
-+                return careful_min(source.minX, Math.max(max_move, source_move), target.maxX);
++                return Math.max(max_move, source_move);
              }
 -
 -            return d0;
 -        } else {
 -            return d0;
          }
--    }
--
++        return source_move;
+     }
+ 
 -    public double collideY(AxisAlignedBB axisalignedbb, double d0) {
 -        if (axisalignedbb.maxX > this.minX && axisalignedbb.minX < this.maxX
 -                && axisalignedbb.maxZ > this.minZ && axisalignedbb.minZ < this.maxZ) {
 -            double d1;
--
++    public static double collideY(AxisAlignedBB target, AxisAlignedBB source, double source_move) {
++        if (target.isEmpty() | source.isEmpty()) {
++            return source_move;
++        }
++        if (Math.abs(source_move) < EPSILON) {
++            return 0.0;
++        }
+ 
 -            if (d0 > 0.0D && axisalignedbb.maxY <= this.minY) {
 -                d1 = this.minY - axisalignedbb.maxY;
 -                if (d1 < d0) {
 -                    d0 = d1;
-+        return source_move;
-+    }
-+
-+    public static strictfp double collideY(AxisAlignedBB target, AxisAlignedBB source, double source_move) {
-+        if (source.maxX > target.minX && source.minX < target.maxX
-+                && source.maxZ > target.minZ && source.minZ < target.maxZ) {
-+            // we really want to be careful to ensure that this condition is never true for the adjusted move value:
-+            // (source.max + ret) > this.min && (source.min + ret) < this.max (this is an intersect check)
++        if ((source.minX - target.maxX) < -EPSILON && (source.maxX - target.minX) > EPSILON &&
++                (source.minZ - target.maxZ) < -EPSILON && (source.maxZ - target.minZ) > EPSILON) {
 +            if (source_move >= 0.0) {
-+                double max_move = target.minY - source.maxY; // < 0.0 if no collision
-+                if (max_move < 0.0) {
++                double max_move = target.minY - source.maxY; // < 0.0 if no strict collision
++                if (max_move < -EPSILON) {
 +                    return source_move;
                  }
 -            } else if (d0 < 0.0D && axisalignedbb.minY >= this.maxY) {
 -                d1 = this.maxY - axisalignedbb.minY;
 -                if (d1 > d0) {
 -                    d0 = d1;
-+                return careful_max(source.maxY, Math.min(max_move, source_move), target.minY);
++                return Math.min(max_move, source_move);
 +            } else {
-+                double max_move = target.maxY - source.minY; // > 0.0 if no collision
-+                if (max_move > 0.0) {
++                double max_move = target.maxY - source.minY; // > 0.0 if no strict collision
++                if (max_move > EPSILON) {
 +                    return source_move;
                  }
-+                return careful_min(source.minY, Math.max(max_move, source_move), target.maxY);
++                return Math.max(max_move, source_move);
              }
 -
 -            return d0;
 -        } else {
 -            return d0;
          }
--    }
--
++        return source_move;
+     }
+ 
 -    public double collideZ(AxisAlignedBB axisalignedbb, double d0) {
 -        if (axisalignedbb.maxX > this.minX && axisalignedbb.minX < this.maxX
 -                && axisalignedbb.maxY > this.minY && axisalignedbb.minY < this.maxY) {
 -            double d1;
--
++    public static double collideZ(AxisAlignedBB target, AxisAlignedBB source, double source_move) {
++        if (target.isEmpty() | source.isEmpty()) {
++            return source_move;
++        }
++        if (Math.abs(source_move) < EPSILON) {
++            return 0.0;
++        }
+ 
 -            if (d0 > 0.0D && axisalignedbb.maxZ <= this.minZ) {
 -                d1 = this.minZ - axisalignedbb.maxZ;
 -                if (d1 < d0) {
 -                    d0 = d1;
-+        return source_move;
-+    }
-+
-+    public static strictfp double collideZ(AxisAlignedBB target, AxisAlignedBB source, double source_move) {
-+        if (source.maxX > target.minX && source.minX < target.maxX
-+                && source.maxY > target.minY && source.minY < target.maxY) {
-+            // we really want to be careful to ensure that this condition is never true for the adjusted move value:
-+            // (source.max + ret) > this.min && (source.min + ret) < this.max (this is an intersect check)
++        if ((source.minX - target.maxX) < -EPSILON && (source.maxX - target.minX) > EPSILON &&
++                (source.minY - target.maxY) < -EPSILON && (source.maxY - target.minY) > EPSILON) {
 +            if (source_move >= 0.0) {
-+                double max_move = target.minZ - source.maxZ; // < 0.0 if no collision
-+                if (max_move < 0.0) {
++                double max_move = target.minZ - source.maxZ; // < 0.0 if no strict collision
++                if (max_move < -EPSILON) {
 +                    return source_move;
                  }
 -            } else if (d0 < 0.0D && axisalignedbb.minZ >= this.maxZ) {
 -                d1 = this.maxZ - axisalignedbb.minZ;
 -                if (d1 > d0) {
 -                    d0 = d1;
-+                return careful_max(source.maxZ, Math.min(max_move, source_move), target.minZ);
++                return Math.min(max_move, source_move);
 +            } else {
-+                double max_move = target.maxZ - source.minZ; // > 0.0 if no collision
-+                if (max_move > 0.0) {
++                double max_move = target.maxZ - source.minZ; // > 0.0 if no strict collision
++                if (max_move > EPSILON) {
 +                    return source_move;
                  }
-+                return careful_min(source.minZ, Math.max(max_move, source_move), target.maxZ);
++                return Math.max(max_move, source_move);
              }
 -
 -            return d0;
@@ -271,18 +288,27 @@ index d54bf71409fe299671aa3f72315f18a188b0db9d..bfe5863a4065bc528fe1d90590d7b00a
      }
  
      public final AxisAlignedBB offsetX(double dx) {
-diff --git a/src/main/java/net/minecraft/server/Entity.java b/src/main/java/net/minecraft/server/Entity.java
-index 958f361a55dd5e2eada56088b0d53a54c2dd76c3..2b953436158c89099e3ea0133ff6c9a3c2a7ec26 100644
---- a/src/main/java/net/minecraft/server/Entity.java
-+++ b/src/main/java/net/minecraft/server/Entity.java
-@@ -898,43 +898,43 @@ public abstract class Entity implements INamableTileEntity, ICommandListener, Ke
+@@ -115,6 +151,7 @@ public class AxisAlignedBB {
+         this.maxX = d3;
+         this.maxY = d4;
+         this.maxZ = d5;
++        this.isEmpty = this.isEmpty0(); // Tuinity
      }
  
-     // Tuinity start - optimise entity movement
--    private static double performCollisionsX(AxisAlignedBB currentBoundingBox, double value, List<AxisAlignedBB> potentialCollisions) {
-+    private static strictfp double performCollisionsX(AxisAlignedBB currentBoundingBox, double value, List<AxisAlignedBB> potentialCollisions) {
-         for (int i = 0, len = potentialCollisions.size(); i < len; ++i) {
-             if (Math.abs(value) < 1.0E-7) {
+     public final AxisAlignedBB expandUpwards(double dy) {
+@@ -133,6 +170,7 @@ public class AxisAlignedBB {
+         this.maxX = Math.max(d0, d3);
+         this.maxY = Math.max(d1, d4);
+         this.maxZ = Math.max(d2, d5);
++        this.isEmpty = this.isEmpty0(); // Tuinity
+     }
+ 
+     public AxisAlignedBB(BlockPosition blockposition) {
+diff --git a/src/main/java/net/minecraft/server/Entity.java b/src/main/java/net/minecraft/server/Entity.java
+index 958f361a55dd5e2eada56088b0d53a54c2dd76c3..b9b11cb2150c26eb024687d158af17f4be010680 100644
+--- a/src/main/java/net/minecraft/server/Entity.java
++++ b/src/main/java/net/minecraft/server/Entity.java
+@@ -904,7 +904,7 @@ public abstract class Entity implements INamableTileEntity, ICommandListener, Ke
                  return 0.0;
              }
              AxisAlignedBB target = potentialCollisions.get(i);
@@ -291,12 +317,7 @@ index 958f361a55dd5e2eada56088b0d53a54c2dd76c3..2b953436158c89099e3ea0133ff6c9a3
          }
  
          return value;
-     }
- 
--    private static double performCollisionsY(AxisAlignedBB currentBoundingBox, double value, List<AxisAlignedBB> potentialCollisions) {
-+    private static strictfp double performCollisionsY(AxisAlignedBB currentBoundingBox, double value, List<AxisAlignedBB> potentialCollisions) {
-         for (int i = 0, len = potentialCollisions.size(); i < len; ++i) {
-             if (Math.abs(value) < 1.0E-7) {
+@@ -916,7 +916,7 @@ public abstract class Entity implements INamableTileEntity, ICommandListener, Ke
                  return 0.0;
              }
              AxisAlignedBB target = potentialCollisions.get(i);
@@ -305,12 +326,7 @@ index 958f361a55dd5e2eada56088b0d53a54c2dd76c3..2b953436158c89099e3ea0133ff6c9a3
          }
  
          return value;
-     }
- 
--    private static double performCollisionsZ(AxisAlignedBB currentBoundingBox, double value, List<AxisAlignedBB> potentialCollisions) {
-+    private static strictfp double performCollisionsZ(AxisAlignedBB currentBoundingBox, double value, List<AxisAlignedBB> potentialCollisions) {
-         for (int i = 0, len = potentialCollisions.size(); i < len; ++i) {
-             if (Math.abs(value) < 1.0E-7) {
+@@ -928,7 +928,7 @@ public abstract class Entity implements INamableTileEntity, ICommandListener, Ke
                  return 0.0;
              }
              AxisAlignedBB target = potentialCollisions.get(i);
@@ -319,19 +335,98 @@ index 958f361a55dd5e2eada56088b0d53a54c2dd76c3..2b953436158c89099e3ea0133ff6c9a3
          }
  
          return value;
+diff --git a/src/main/java/net/minecraft/server/VoxelShapeArray.java b/src/main/java/net/minecraft/server/VoxelShapeArray.java
+index 43b0b4c34c2613b4ef36281e63fad543250da2cf..d318ec207cdc5f0ef6a0480567225ab476d6e074 100644
+--- a/src/main/java/net/minecraft/server/VoxelShapeArray.java
++++ b/src/main/java/net/minecraft/server/VoxelShapeArray.java
+@@ -96,17 +96,14 @@ public final class VoxelShapeArray extends VoxelShape {
      }
  
--    private static Vec3D performCollisions(Vec3D moveVector, AxisAlignedBB axisalignedbb, List<AxisAlignedBB> potentialCollisions) {
-+    private static strictfp Vec3D performCollisions(Vec3D moveVector, AxisAlignedBB axisalignedbb, List<AxisAlignedBB> potentialCollisions) {
-         double x = moveVector.x;
-         double y = moveVector.y;
-         double z = moveVector.z;
-@@ -969,7 +969,7 @@ public abstract class Entity implements INamableTileEntity, ICommandListener, Ke
-         return new Vec3D(x, y, z);
-     }
+     public final boolean intersects(AxisAlignedBB axisalingedbb) {
+-        double minX = axisalingedbb.minX - this.offsetX;
+-        double maxX = axisalingedbb.maxX - this.offsetX;
+-        double minY = axisalingedbb.minY - this.offsetY;
+-        double maxY = axisalingedbb.maxY - this.offsetY;
+-        double minZ = axisalingedbb.minZ - this.offsetZ;
+-        double maxZ = axisalingedbb.maxZ - this.offsetZ;
+-
+-        // this can be optimised by checking an "overall shape"
++        // this can be optimised by checking an "overall shape" first, but not needed
++        double offX = this.offsetX;
++        double offY = this.offsetY;
++        double offZ = this.offsetZ;
  
--    Vec3D performCollision(Vec3D moveVector) {
-+    strictfp Vec3D performCollision(Vec3D moveVector) {
-         if (moveVector.getX() == 0.0 && moveVector.getY() == 0.0 && moveVector.getZ() == 0.0) {
-             return moveVector;
+         for (AxisAlignedBB boundingBox : this.boundingBoxesRepresentation) {
+-            if (boundingBox.intersects(minX, minY, minZ, maxX, maxY, maxZ)) {
++            if (axisalingedbb.voxelShapeIntersect(boundingBox.minX + offX, boundingBox.minY + offY, boundingBox.minZ + offZ,
++                    boundingBox.maxX + offX, boundingBox.maxY + offY, boundingBox.maxZ + offZ)) {
+                 return true;
+             }
          }
+diff --git a/src/main/java/net/minecraft/server/VoxelShapeSpliterator.java b/src/main/java/net/minecraft/server/VoxelShapeSpliterator.java
+index e841611bb7c36dffec44bb9e74a0a9657a113263..259605daabb18aedb15d56c78e6553ae2d22e13f 100644
+--- a/src/main/java/net/minecraft/server/VoxelShapeSpliterator.java
++++ b/src/main/java/net/minecraft/server/VoxelShapeSpliterator.java
+@@ -91,7 +91,7 @@ public class VoxelShapeSpliterator extends AbstractSpliterator<VoxelShape> {
+                 VoxelShape voxelshape = iblockdata.b((IBlockAccess) this.g, this.e, this.c);
+ 
+                 if (voxelshape == VoxelShapes.b()) {
+-                    if (!this.b.a((double) i, (double) j, (double) k, (double) i + 1.0D, (double) j + 1.0D, (double) k + 1.0D)) {
++                    if (!this.b.voxelShapeIntersect((double) i, (double) j, (double) k, (double) i + 1.0D, (double) j + 1.0D, (double) k + 1.0D)) { // Tuinity - keep vanilla behavior for voxelshape intersection - See comment in AxisAlignedBB
+                         continue;
+                     }
+ 
+diff --git a/src/main/java/net/minecraft/server/VoxelShapes.java b/src/main/java/net/minecraft/server/VoxelShapes.java
+index 6667e699cc343939271e1d1ae5b44eb87f3a487b..4bdadffee07c54f6f538ba09db72d562d05cb337 100644
+--- a/src/main/java/net/minecraft/server/VoxelShapes.java
++++ b/src/main/java/net/minecraft/server/VoxelShapes.java
+@@ -39,30 +39,29 @@ public final class VoxelShapes {
+     public static void addBoxesToIfIntersects(VoxelShape shape, AxisAlignedBB aabb, java.util.List<AxisAlignedBB> list) {
+         if (shape instanceof com.tuinity.tuinity.voxel.AABBVoxelShape) {
+             com.tuinity.tuinity.voxel.AABBVoxelShape shapeCasted = (com.tuinity.tuinity.voxel.AABBVoxelShape)shape;
+-            if (shapeCasted.aabb.intersects(aabb)) {
++            if (shapeCasted.aabb.voxelShapeIntersect(aabb)) {
+                 list.add(shapeCasted.aabb);
+             }
+         } else if (shape instanceof VoxelShapeArray) {
+             VoxelShapeArray shapeCasted = (VoxelShapeArray)shape;
+-            double minX = aabb.minX - shapeCasted.offsetX;
+-            double maxX = aabb.maxX - shapeCasted.offsetX;
+-            double minY = aabb.minY - shapeCasted.offsetY;
+-            double maxY = aabb.maxY - shapeCasted.offsetY;
+-            double minZ = aabb.minZ - shapeCasted.offsetZ;
+-            double maxZ = aabb.maxZ - shapeCasted.offsetZ;
++            // this can be optimised by checking an "overall shape" first, but not needed
+ 
+-            // this can be optimised by checking an "overall shape"
++            double offX = shapeCasted.offsetX;
++            double offY = shapeCasted.offsetY;
++            double offZ = shapeCasted.offsetZ;
+ 
+             for (AxisAlignedBB boundingBox : shapeCasted.boundingBoxesRepresentation) {
+-                if (boundingBox.intersects(minX, minY, minZ, maxX, maxY, maxZ)) {
+-                    list.add(boundingBox.offset(shapeCasted.offsetX, shapeCasted.offsetY, shapeCasted.offsetZ));
++                double minX, minY, minZ, maxX, maxY, maxZ;
++                if (aabb.voxelShapeIntersect(minX = boundingBox.minX + offX, minY = boundingBox.minY + offY, minZ = boundingBox.minZ + offZ,
++                        maxX = boundingBox.maxX + offX, maxY = boundingBox.maxY + offY, maxZ = boundingBox.maxZ + offZ)) {
++                    list.add(new AxisAlignedBB(minX, minY, minZ, maxX, maxY, maxZ, false));
+                 }
+             }
+         } else {
+             java.util.List<AxisAlignedBB> boxes = shape.getBoundingBoxesRepresentation();
+             for (int i = 0, len = boxes.size(); i < len; ++i) {
+                 AxisAlignedBB box = boxes.get(i);
+-                if (box.intersects(aabb)) {
++                if (box.voxelShapeIntersect(aabb)) {
+                     list.add(box);
+                 }
+             }
+@@ -198,7 +197,7 @@ public final class VoxelShapes {
+         // Tuinity start - optimise voxelshape
+         if (operatorboolean == OperatorBoolean.AND) {
+             if (voxelshape instanceof com.tuinity.tuinity.voxel.AABBVoxelShape && voxelshape1 instanceof com.tuinity.tuinity.voxel.AABBVoxelShape) {
+-                return ((com.tuinity.tuinity.voxel.AABBVoxelShape)voxelshape).aabb.intersects(((com.tuinity.tuinity.voxel.AABBVoxelShape)voxelshape1).aabb);
++                return ((com.tuinity.tuinity.voxel.AABBVoxelShape)voxelshape).aabb.voxelShapeIntersect(((com.tuinity.tuinity.voxel.AABBVoxelShape)voxelshape1).aabb);
+             } else if (voxelshape instanceof com.tuinity.tuinity.voxel.AABBVoxelShape && voxelshape1 instanceof VoxelShapeArray) {
+                 return ((VoxelShapeArray)voxelshape1).intersects(((com.tuinity.tuinity.voxel.AABBVoxelShape)voxelshape).aabb);
+             } else if (voxelshape1 instanceof com.tuinity.tuinity.voxel.AABBVoxelShape && voxelshape instanceof VoxelShapeArray) {

@@ -110,16 +110,14 @@ index 56b955227f11613f112c77c445a9de5bfa3a60f7..b321ad51635949d07b9b818f2940a31b
      }
  }
 diff --git a/src/main/java/net/minecraft/server/AxisAlignedBB.java b/src/main/java/net/minecraft/server/AxisAlignedBB.java
-index d54bf71409fe299671aa3f72315f18a188b0db9d..61abb2d7b1556394791eb529cde7ee4dd0a5b16c 100644
+index d54bf71409fe299671aa3f72315f18a188b0db9d..38e4bde408bb25f3fd7da476aacab08ec8dd445b 100644
 --- a/src/main/java/net/minecraft/server/AxisAlignedBB.java
 +++ b/src/main/java/net/minecraft/server/AxisAlignedBB.java
-@@ -14,86 +14,118 @@ public class AxisAlignedBB {
-     public final double maxZ;
+@@ -15,85 +15,117 @@ public class AxisAlignedBB {
  
      // Tuinity start
--    public final boolean isEmpty() {
+     public final boolean isEmpty() {
 -        return (this.maxX - this.minX) < 1.0E-7 && (this.maxY - this.minY) < 1.0E-7 && (this.maxZ - this.minZ) < 1.0E-7;
-+    private final boolean isEmpty() {
 +        return (this.maxX - this.minX) < EPSILON && (this.maxY - this.minY) < EPSILON && (this.maxZ - this.minZ) < EPSILON;
      }
  
